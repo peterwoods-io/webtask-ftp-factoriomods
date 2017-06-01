@@ -7,6 +7,7 @@
 
 const FtpClient = require('ftp');
 const Https = require('https');
+const kModPortalUriBase = 'https://mods.factorio.com';
 
 /*
     ftpMeta is a hash containing info about the FTP server
@@ -61,8 +62,6 @@ function getModInfoPromise(ftpMeta) {
 // Check the Factorio mods portal for the latest version
 // of a given mod, and return an amended modInfo with that info.
 function getLatestModInfoPromise(modInfo) {
-    const kModPortalUriBase = 'https://mods.factorio.com';
-
     return new Promise((resolve, reject) => {
         let searchUri = kModPortalUriBase + '/api/mods?q=' + modInfo.name
 
@@ -100,7 +99,30 @@ function getLatestModInfoPromise(modInfo) {
     });
 }
 
-module.exports = (ctx, cb) => {
+function outputModInfo(modInfoList) {
+    var ret = '';
+
+    modInfoList.forEach((modInfo) => {
+        let latestVersion = modInfo.portalLatestRelease["version"];
+
+        if (latestVersion !== modInfo.version) {
+            ret += "<strong>" + modInfo.name+ "</strong> " + modInfo.version + " is out of date.<br>";
+            ret += "Latest release is " + latestVersion + "<br>";
+
+            let downloadUri = kModPortalUriBase + modInfo.portalLatestRelease["download_url"];
+
+            ret += "Download link: <a href='" + downloadUri + "'>" + downloadUri + "</a><br>";
+        } else {
+            ret += "<strong>" + modInfo.name + "</strong> is up to date<br>";
+        }
+
+        ret += "<br>";
+    });
+
+    return ret;
+}
+
+module.exports = (ctx, req, res) => {
     var modInfoPromise = getModInfoPromise({
         host: ctx.secrets.ftpHost,
         port: ctx.secrets.ftpPort,
@@ -109,13 +131,18 @@ module.exports = (ctx, cb) => {
         mod_directory: ctx.secrets.ftpModDirectory
     });
 
+    const kHtmlContentType = { 'Content-Type': 'text/html' };
+
     modInfoPromise.then((modInfoList) => {
         return Promise.all(modInfoList.map((modInfo) => {
             return getLatestModInfoPromise(modInfo);
         }));
     }).then((modInfoList) => {
-        cb(null, modInfoList);
+        res.writeHead(200, kHtmlContentType);
+        res.end(outputModInfo(modInfoList));
     }).catch((err) => {
-        cb(err, null);
+        res.writeHead(500, kHtmlContentType);
+        console.err(err);
+        res.end('Error: ' + err);
     });
 };
