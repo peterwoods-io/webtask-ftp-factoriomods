@@ -58,6 +58,48 @@ function getModInfoPromise(ftpMeta) {
     });
 }
 
+// Check the Factorio mods portal for the latest version
+// of a given mod, and return an amended modInfo with that info.
+function getLatestModInfoPromise(modInfo) {
+    const kModPortalUriBase = 'https://mods.factorio.com';
+
+    return new Promise((resolve, reject) => {
+        let searchUri = kModPortalUriBase + '/api/mods?q=' + modInfo.name
+
+        Https.get(searchUri, (response) => {
+            var rawResponse = '';
+
+            response.on('data', (d) => { rawResponse += d; });
+
+            response.on('end', () => {
+                var portalData = JSON.parse(rawResponse);
+
+                if (!("results" in portalData)) {
+                    reject("Could not get info for " + modInfo.name + " from the mod portal");
+                    return;
+                }
+
+                portalData["results"].forEach((portalResult) => {
+                    let latestRelease = portalResult["latest_release"];
+
+                    if (latestRelease["info_json"]["name"] !== modInfo.name) {
+                        return;
+                    }
+
+                    modInfo.portalLatestRelease = latestRelease;
+
+                    resolve(modInfo);
+                });
+            });
+        }).on('error', (e) => {
+            console.error("Failed to query mod portal for " + modInfo.name);
+            console.error(e);
+
+            reject(e);
+        });
+    });
+}
+
 module.exports = (ctx, cb) => {
     var modInfoPromise = getModInfoPromise({
         host: ctx.secrets.ftpHost,
@@ -67,9 +109,13 @@ module.exports = (ctx, cb) => {
         mod_directory: ctx.secrets.ftpModDirectory
     });
 
-    modInfoPromise.then((modInfo) => {
-        cb(null, modInfo);
-    }, (err) => {
+    modInfoPromise.then((modInfoList) => {
+        return Promise.all(modInfoList.map((modInfo) => {
+            return getLatestModInfoPromise(modInfo);
+        }));
+    }).then((modInfoList) => {
+        cb(null, modInfoList);
+    }).catch((err) => {
         cb(err, null);
     });
 };
